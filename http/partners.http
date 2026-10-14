@@ -1,0 +1,133 @@
+# Partners API — HTTP examples
+# Works with the VS Code "REST Client" extension, Visual Studio 2022 (17.12+) and JetBrains Rider.
+# Start the API first:  dotnet run --project src/Partners.Api   (http://localhost:5080)
+# Run the requests from top to bottom: later ones reuse the id/version of earlier responses.
+
+@baseUrl = http://localhost:5080
+@json = application/json
+
+### 1. Create a customer — Name and NIF are normalized ("Ana Costa", "011223344")
+# @name create
+POST {{baseUrl}}/api/partners
+Content-Type: {{json}}
+
+{
+  "name": "  Ana Costa  ",
+  "taxNumber": "011.223.344",
+  "type": "CUSTOMER",
+  "email": "  ana.costa@example.com ",
+  "creditLimit": 2500.75
+}
+
+### 2. Same NIF in another representation → 409 Conflict
+POST {{baseUrl}}/api/partners
+Content-Type: {{json}}
+
+{
+  "name": "Someone Else",
+  "taxNumber": "011 223 344",
+  "type": "SUPPLIER",
+  "email": null,
+  "creditLimit": 0
+}
+
+### 3. Invalid values → 400 with every error (3 decimals, letters in NIF, unknown type, bad email)
+POST {{baseUrl}}/api/partners
+Content-Type: {{json}}
+
+{
+  "name": "A",
+  "taxNumber": "12345678A",
+  "type": "VENDOR",
+  "email": "not-an-email",
+  "creditLimit": 10.999
+}
+
+### 4. Get by Id (also works for inactive partners)
+GET {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+
+### 5. Get unknown Id → 404
+GET {{baseUrl}}/api/partners/00000000-0000-0000-0000-000000000000
+
+### 6. Update with the current Version → 200 and a new Version (deactivates the partner)
+# @name deactivate
+PUT {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+Content-Type: {{json}}
+
+{
+  "name": "Ana Costa",
+  "taxNumber": "011223344",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 3000,
+  "isActive": false,
+  "version": "{{create.response.body.$.version}}"
+}
+
+### 7. Same (now stale) Version again → 409 Conflict, nothing is overwritten
+PUT {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+Content-Type: {{json}}
+
+{
+  "name": "Stale Writer",
+  "taxNumber": "011223344",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 3000,
+  "isActive": true,
+  "version": "{{create.response.body.$.version}}"
+}
+
+### 8. Reactivate with the latest Version → 200
+PUT {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+Content-Type: {{json}}
+
+{
+  "name": "Ana Costa",
+  "taxNumber": "011223344",
+  "type": "BOTH",
+  "email": "ana.costa@example.com",
+  "creditLimit": 3000,
+  "isActive": true,
+  "version": "{{deactivate.response.body.$.version}}"
+}
+
+### 9. Malformed Version → 400
+PUT {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+Content-Type: {{json}}
+
+{
+  "name": "Ana Costa",
+  "taxNumber": "011223344",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 3000,
+  "isActive": true,
+  "version": "not-a-version"
+}
+
+### 10. Missing properties on PUT (full replacement required) → 400
+PUT {{baseUrl}}/api/partners/{{create.response.body.$.id}}
+Content-Type: {{json}}
+
+{
+  "name": "Only The Name"
+}
+
+### 11. List with defaults (active only, page 1, 20 per page, ordered by Name then Id)
+GET {{baseUrl}}/api/partners
+
+### 12. Search by partial name, case-insensitive
+GET {{baseUrl}}/api/partners?search=ana
+
+### 13. Search by NIF fragment with separators (normalized to "1223")
+GET {{baseUrl}}/api/partners?search=1.223
+
+### 14. CUSTOMER filter also returns BOTH; combined with search, inactive and paging
+GET {{baseUrl}}/api/partners?type=CUSTOMER&search=a&includeInactive=true&page=1&pageSize=2
+
+### 15. Page beyond the results → empty Items, correct TotalCount
+GET {{baseUrl}}/api/partners?page=999&pageSize=100
+
+### 16. Invalid filters → 400 (Page=0, unknown Type, PageSize > 100)
+GET {{baseUrl}}/api/partners?page=0&type=VENDOR&pageSize=101
